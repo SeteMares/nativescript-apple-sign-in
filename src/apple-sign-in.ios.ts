@@ -11,7 +11,8 @@ import jsArrayToNSArray = iOSUtils.collections.jsArrayToNSArray;
 import nsArrayToJSArray = iOSUtils.collections.nsArrayToJSArray;
 
 let controller: any /* ASAuthorizationController */;
-let delegate: ASAuthorizationControllerDelegateImpl;
+let delegate: any;
+let ASAuthorizationControllerDelegateImpl: any;
 
 declare const ASAuthorizationAppleIDProvider,
   ASAuthorizationController,
@@ -68,6 +69,86 @@ export function getSignInWithAppleState(
   });
 }
 
+if (isSignInWithAppleSupported()) {
+  ASAuthorizationControllerDelegateImpl = (<any>NSObject).extend({
+    authorizationControllerDidCompleteWithAuthorization: function(
+      controller: any /* ASAuthorizationController */,
+      authorization: {
+        provider: any;
+        credential: SignInWithAppleCredential & {
+          accessToken?: NSData;
+          authenticatedResponse?: NSHTTPURLResponse;
+          authorizationCode?: NSData;
+          authorizedScopes?: NSArray<string>;
+          identityToken?: NSData;
+        };
+      }
+    ): void {
+      if (authorization && authorization.credential) {
+        const data: SignInWithAppleAuthorization = {
+          provider: authorization.provider,
+          credential: {
+            // primitive data
+            email: authorization.credential.email,
+            fullName: authorization.credential.fullName,
+            realUserStatus: authorization.credential.realUserStatus,
+            state: authorization.credential.state,
+            user: authorization.credential.user,
+            password: authorization.credential.password
+          }
+        };
+        // then in addition for added convenience, convert some native objects to friendly js
+        if (authorization.credential.accessToken) {
+          data.credential.accessToken = <string>(<unknown>NSString.alloc()
+            .initWithDataEncoding(
+              authorization.credential.accessToken,
+              NSUTF8StringEncoding
+            )
+            .toString());
+        }
+        if (authorization.credential.authorizationCode) {
+          data.credential.authorizationCode = <string>(<unknown>NSString.alloc()
+            .initWithDataEncoding(
+              authorization.credential.authorizationCode,
+              NSUTF8StringEncoding
+            )
+            .toString());
+        }
+        if (authorization.credential.authorizedScopes) {
+          data.credential.authorizedScopes = nsArrayToJSArray(
+            authorization.credential.authorizedScopes
+          );
+        }
+        if (authorization.credential.identityToken) {
+          data.credential.identityToken = <string>(<unknown>NSString.alloc()
+            .initWithDataEncoding(
+              authorization.credential.identityToken,
+              NSUTF8StringEncoding
+            )
+            .toString());
+        }
+        this.resolve(data);
+      } else {
+        this.reject("auth error: no credential returned.");
+      }
+    },
+    authorizationControllerDidCompleteWithError: function(
+      controller: any /* ASAuthorizationController */,
+      error: NSError
+    ): void {
+      this.reject(error.localizedDescription);
+    }
+  }, {
+    protocols: [ASAuthorizationControllerDelegate]
+  });
+  ASAuthorizationControllerDelegateImpl['createWithPromise'] = function(resolve, reject) {
+    const delegate = ASAuthorizationControllerDelegateImpl.new();
+    delegate.resolve = resolve;
+    delegate.reject = reject;
+    return delegate;
+  };
+}
+
 export function signInWithApple(
   options?: SignInWithAppleOptions
 ): Promise<SignInWithAppleAuthorization> {
@@ -109,109 +190,4 @@ export function signInWithApple(
     );
     controller.performRequests();
   });
-}
-
-class ASAuthorizationControllerDelegateImpl extends NSObject /* implements ASAuthorizationControllerDelegate */ {
-  public static ObjCProtocols = [];
-  private resolve;
-  private reject;
-
-  public static new(): ASAuthorizationControllerDelegateImpl {
-    try {
-      ASAuthorizationControllerDelegateImpl.ObjCProtocols.push(
-        ASAuthorizationControllerDelegate
-      );
-      return <ASAuthorizationControllerDelegateImpl>super.new();
-    } catch (ignore) {
-      console.log(
-        "Apple Sign In not supported on this device - it requires iOS 13+. Tip: use 'isSignInWithAppleSupported' before calling 'signInWithApple'."
-      );
-      return null;
-    }
-  }
-
-  public static createWithPromise(
-    resolve,
-    reject
-  ): ASAuthorizationControllerDelegateImpl {
-    const delegate = <ASAuthorizationControllerDelegateImpl>(
-      ASAuthorizationControllerDelegateImpl.new()
-    );
-    if (delegate === null) {
-      reject("Not supported");
-    } else {
-      delegate.resolve = resolve;
-      delegate.reject = reject;
-    }
-    return delegate;
-  }
-
-  authorizationControllerDidCompleteWithAuthorization(
-    controller: any /* ASAuthorizationController */,
-    authorization: {
-      provider: any;
-      credential: SignInWithAppleCredential & {
-        accessToken?: NSData;
-        authenticatedResponse?: NSHTTPURLResponse;
-        authorizationCode?: NSData;
-        authorizedScopes?: NSArray<string>;
-        identityToken?: NSData;
-      };
-    }
-  ): void {
-    if (authorization && authorization.credential) {
-      const data: SignInWithAppleAuthorization = {
-        provider: authorization.provider,
-        credential: {
-          // primitive data
-          email: authorization.credential.email,
-          fullName: authorization.credential.fullName,
-          realUserStatus: authorization.credential.realUserStatus,
-          state: authorization.credential.state,
-          user: authorization.credential.user,
-          password: authorization.credential.password
-        }
-      };
-      // then in addition for added convenience, convert some native objects to friendly js
-      if (authorization.credential.accessToken) {
-        data.credential.accessToken = <string>(<unknown>NSString.alloc()
-          .initWithDataEncoding(
-            authorization.credential.accessToken,
-            NSUTF8StringEncoding
-          )
-          .toString());
-      }
-      if (authorization.credential.authorizationCode) {
-        data.credential.authorizationCode = <string>(<unknown>NSString.alloc()
-          .initWithDataEncoding(
-            authorization.credential.authorizationCode,
-            NSUTF8StringEncoding
-          )
-          .toString());
-      }
-      if (authorization.credential.authorizedScopes) {
-        data.credential.authorizedScopes = nsArrayToJSArray(
-          authorization.credential.authorizedScopes
-        );
-      }
-      if (authorization.credential.identityToken) {
-        data.credential.identityToken = <string>(<unknown>NSString.alloc()
-          .initWithDataEncoding(
-            authorization.credential.identityToken,
-            NSUTF8StringEncoding
-          )
-          .toString());
-      }
-      this.resolve(data);
-    } else {
-      this.reject("auth error: no credential returned.");
-    }
-  }
-
-  authorizationControllerDidCompleteWithError(
-    controller: any /* ASAuthorizationController */,
-    error: NSError
-  ): void {
-    this.reject(error.localizedDescription);
-  }
 }
